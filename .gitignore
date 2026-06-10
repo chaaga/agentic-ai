@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+
+rfp-assistant-excel/chroma_db/
+rfp-assistant-excel/data/
