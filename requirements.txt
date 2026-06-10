@@ -4,3 +4,5 @@ chromadb
 ollama 
 openpyxl
 sentence-transformers
+python-dotenv
+ipykernel
