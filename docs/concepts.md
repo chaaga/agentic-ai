@@ -4,6 +4,36 @@ Personal knowledge base — concepts, decisions, and insights accumulated while
 learning RAG and agentic AI patterns.
 
 ---
+## LLM Fundamentals
+
+### Token
+A token is the unit of text an LLM processes — roughly ¾ of a word, or ~4 characters of common English (so 100 tokens ≈ 75 words). "Hello" is typically one token; "I'm" splits into "I" and "m". Try it: https://platform.openai.com/tokenizer
+
+LLMs don't read words — they have a fixed vocabulary of ~100K tokens (words, syllables, letters). A tokenizer chops input text into these pieces and maps each to an ID. Rare words or typos just get built from smaller letter/syllable pieces, like Legos.
+
+Each token ID maps to a precomputed "embedding" vector, fixed during training and stored in the model's weights. At inference, this is a fast lookup: token IDs → their embedding vectors → fed through attention (to relate tokens to each other in context) → predict the next token's probabilities.
+
+Cost is calculated from input + output tokens, with output tokens typically costing more — so an architecture that generates verbose intermediate reasoning has a different cost profile than one producing terse structured output.
+
+### Context Window
+Context window is like the model's working memory — everything it can "see" at once when generating a response. It includes the system prompt, conversation history, any documents you inject, tool results, and the response being generated. Everything counts against the same limit.
+
+A 200K token context window (Claude) sounds large until you realize a 50-page document is roughly 40K tokens, a long conversation history accumulates fast, and every tool call result gets appended to the context. 
+
+Issues with large context windows:
+- "lost in the middle" problem — models attend well to content at the beginning and end of a long context but tend to miss information buried in the middle. A 150K token context doesn't mean 150K tokens of equally-weighted information. This is why chunking and retrieval strategies matter even when content technically fits.
+- Context window cost scales with every token in and out. A naive implementation that stuffs the full conversation history into every call gets expensive fast at scale. Strategies to reduce the cost:
+  - summarizing conversation history
+  - evicting stale information
+  - dynamically retrieving just the relevant slice for each task — this is what RAG and knowledge-graph/retrieval layers do (see below)
+
+At large enough scale (e.g. an AI tool processing millions of lines of code per run), no context window — however large — can hold everything. Retrieval isn't just a cost optimization at that point; it's the only way to fit the relevant slice of a much bigger corpus into context at all.
+
+Retrieval only reduces cost if it's *selective*. Pulling the entire employee handbook into context for every question isn't retrieval — it's just moving the same large document into the prompt, with the same cost and lost-in-the-middle problems. The savings come from narrowing scope per query: chunk the handbook into small sections, embed them, and at query time fetch only the few chunks relevant to *this* question (e.g. just the parental leave section, not all 200 pages). Poorly tuned retrieval (chunks too large, top-k too high, no confidence gating) can quietly degrade back into "the whole document anyway."
+
+
+
+---
 
 ## RAG (Retrieval-Augmented Generation)
 
