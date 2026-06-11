@@ -37,11 +37,21 @@ machine.
 ### 1. Prerequisites
 
 - Python 3.12 (see `.python-version`)
-- [Ollama](https://ollama.com/) installed and running locally, with the
-  `llama3.1:8b` model pulled:
-  ```
-  ollama pull llama3.1:8b
-  ```
+- [Ollama](https://ollama.com/) installed and running locally:
+  1. Download and install Ollama for your OS from
+     [ollama.com/download](https://ollama.com/download).
+  2. Verify it's running:
+     ```
+     ollama --version
+     ```
+  3. Pull the model used by this project (`llama3.1:8b`, ~4.7 GB):
+     ```
+     ollama pull llama3.1:8b
+     ```
+  4. (Optional) Confirm it works:
+     ```
+     ollama run llama3.1:8b "Say hello"
+     ```
 
 ### 2. Create a virtual environment
 
@@ -74,6 +84,12 @@ This will:
 - For each new question, retrieve and rerank the closest past answers
 - Draft a response, scored as `AUTO-PASS`, `REVIEW NEEDED`, or `LOW CONFIDENCE`
 - Write results to `data/rfp_draft_responses.xlsx`
+
+## Concepts
+
+For background on RAG fundamentals (two-stage retrieval, confidence
+gating, common challenges) and when to use RAG vs MCP/tools, see the
+[RAG section in ai-cookbook/LEARNINGS.md](https://github.com/chaaga/ai-cookbook/blob/main/LEARNINGS.md#rag-retrieval-augmented-generation).
 
 ## Other scripts
 

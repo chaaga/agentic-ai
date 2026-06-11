@@ -74,7 +74,7 @@ def retrieve(query: str, top_k: int = 1) -> dict:
 
 # ---- STEP 5: GENERATE ---------------------------------------
 def generate(query: str, context: str) -> str:
-    print(f"\n🤖 Generating response with Ollama...")
+    print(f"\nGenerating response with Ollama...")
     prompt = (
         f"Answer the question using ONLY the context below.\n"
         f"Do not add information not present in the context.\n\n"
@@ -117,6 +117,7 @@ if __name__ == "__main__":
         "What security certifications do you have?",
         "Can your system be deployed on-premises?",
         "Can your system be integrated with external systems?",
+        "What is 2+2",
     ]
 
     for q in demo_questions:
