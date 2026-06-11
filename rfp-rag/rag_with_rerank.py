@@ -156,15 +156,12 @@ def rerank(query: str, candidates: list) -> list:
 # Running 100% locally via Ollama — no data leaves your machine
 def generate(query: str, context: str) -> str:
     print("\nGenerating response with Ollama (llama3.1:8b)...")
-    prompt = (
-        f"Answer the question using ONLY the context below.\n"
-        f"Context: {context}\n\n"
-        f"Question: {query}\n\n"
-        f"Answer:"
-    )
     response = ollama.chat(
         model="llama3.1:8b",
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": "Answer the question using ONLY the provided context."},
+            {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}\n\nAnswer:"},
+        ],
         # 2048 was enough for one answer; with up to MAX_CONTEXTS answers
         # in the prompt, a larger window avoids silent truncation
         options={"temperature": 0.0, "num_ctx": 8192},

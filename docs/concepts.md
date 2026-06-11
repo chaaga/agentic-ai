@@ -31,7 +31,28 @@ At large enough scale (e.g. an AI tool processing millions of lines of code per 
 
 Retrieval only reduces cost if it's *selective*. Pulling the entire employee handbook into context for every question isn't retrieval — it's just moving the same large document into the prompt, with the same cost and lost-in-the-middle problems. The savings come from narrowing scope per query: chunk the handbook into small sections, embed them, and at query time fetch only the few chunks relevant to *this* question (e.g. just the parental leave section, not all 200 pages). Poorly tuned retrieval (chunks too large, top-k too high, no confidence gating) can quietly degrade back into "the whole document anyway."
 
+### Temperature
+Temperature controls how deterministic vs. creative the model's outputs are. At temperature 0 the model always picks the highest-probability next token — fully deterministic, same output every time. At temperature 1 it samples more broadly, producing varied and creative outputs. Above 1 outputs become increasingly random and often incoherent.
 
+For Compliance checking, code generation, structured data extraction, classification temperature should be 0 or very low (0.1-0.2). You want the same answer every time, you want the most probable correct answer, and creativity is a bug not a feature. 
+
+Creative writing, brainstorming, generating diverse options, conversational responses — these benefit from higher temperature (0.7-1.0) to avoid repetitive or formulaic outputs.
+
+
+### Prompts
+
+#### Prompt Caching
+
+Prompt caching (a.k.a. context caching) lets a provider reuse the model's internal computation for parts of the prompt that don't change between calls, instead of reprocessing the full prompt from scratch every time.
+
+**What's actually being cached:** Embedding lookups are trivial (a table lookup) and aren't the bottleneck — the expensive part is the transformer's attention computation across all tokens, which scales with context length. Prompt caching stores the intermediate attention activations ("KV cache") for a static prefix of the prompt. On a later call with the same prefix, the model skips recomputing attention for that part and only processes the new/changed tokens (e.g. the latest user message).
+
+**How to use it:**
+- Structure prompts so static content comes first and dynamic content comes last — e.g. system prompt + tool definitions + reference docs (static), then conversation history + user query (dynamic).
+- The cache only helps if the prefix is byte-for-byte identical across calls. Changing a tool description or reordering tools invalidates the cache for everything after that point.
+- Anthropic's prompt caching: cached tokens cost ~10% of normal input price, with a short TTL (~5 minutes, refreshed on each cache hit).
+
+**When it matters:** agent loops with a large, unchanging tool list and system prompt (re-sent on every turn), RAG apps that pin a long reference document across a multi-turn conversation, or any workflow making repeated calls with a shared static prefix.
 
 ---
 
