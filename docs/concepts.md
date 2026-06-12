@@ -11,9 +11,22 @@ A token is the unit of text an LLM processes — roughly ¾ of a word, or ~4 cha
 
 LLMs don't read words — they have a fixed vocabulary of ~100K tokens (words, syllables, letters). A tokenizer chops input text into these pieces and maps each to an ID. Rare words or typos just get built from smaller letter/syllable pieces, like Legos.
 
-Each token ID maps to a precomputed "embedding" vector, fixed during training and stored in the model's weights. At inference, this is a fast lookup: token IDs → their embedding vectors → fed through attention (to relate tokens to each other in context) → predict the next token's probabilities.
-
 Cost is calculated from input + output tokens, with output tokens typically costing more — so an architecture that generates verbose intermediate reasoning has a different cost profile than one producing terse structured output.
+
+### Embeddings, Weights, and Parameters
+
+How these three relate, from smallest to largest:
+
+- **Token** — a piece of text (word/sub-word), represented as an integer ID.
+- **Embedding** — a vector of numbers (e.g. 4096 floats) assigned to each token ID. It's the model's learned representation of that token's meaning. The full set of embeddings is just one big lookup table — one row per vocabulary token.
+- **Weights / parameters** — the embedding table is *one piece* of the model's weights, but most of the weights live in the transformer layers (attention + feed-forward) that sit between the embedding lookup and the final prediction. "Weights" and "parameters" are the same thing — the billions of tunable numbers, learned during training, that encode everything the model "knows" (grammar, facts, reasoning patterns).
+
+**At inference**, the flow is: token IDs → look up embeddings → pass through transformer layers (the bulk of the weights, doing attention + computation) → predict the next token's probabilities.
+
+**Training vs. loading:** during training, supercomputers adjust these billions of numbers over weeks/months until they converge. Once training finishes, the entire grid of weights is saved to disk as a file (the "model weights" you download). Loading a model means reading that file into RAM/VRAM — the numbers themselves don't change after that (unless you fine-tune).
+
+**Model size vs. dataset:** a 7B-parameter model and a 70B-parameter model can be trained on the *same* dataset; model size and dataset size are independent. Think of the dataset as a fixed encyclopedia, the 7B model as a small notebook, and the 70B model as a large filing cabinet, both summarizing the same encyclopedia. The 70B model has 10x more "slots" to store nuance, rare facts, and finer-grained patterns, which is generally why it performs better, even when reading identical training data.
+
 
 ### Context Window
 Context window is like the model's working memory — everything it can "see" at once when generating a response. It includes the system prompt, conversation history, any documents you inject, tool results, and the response being generated. Everything counts against the same limit.
