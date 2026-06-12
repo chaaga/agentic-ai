@@ -6,3 +6,4 @@ openpyxl
 sentence-transformers
 python-dotenv
 ipykernel
+mcp[cli]==1.10.1

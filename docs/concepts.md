@@ -121,7 +121,7 @@ These solve different problems and are commonly combined, not competing choices:
 | Freshness | Snapshot — index rebuilt periodically | Live — hits the source directly |
 | Context size | Depends on chunking/reranking quality | Naturally small — fetch only what's needed for the query |
 
-"Keep the context window small" is solved by **better retrieval** (smaller chunks, reranking, confidence gating), not by replacing RAG with tools — tools don't help when the knowledge is unstructured prose with no precise query. For an RFP assistant, the realistic pattern is both: MCP/tools for "look up this client's contract terms in the database," RAG for "find similar answers we've given to this kind of question before."
+"Keep the context window small" is solved by **better retrieval** (smaller chunks, reranking, confidence gating), not by replacing RAG with tools — tools don't help when the knowledge is unstructured text with no precise query. For an RFP assistant, the realistic pattern is both: MCP/tools for "look up this client's contract terms in the database," RAG for "find similar answers we've given to this kind of question before."
 
 ---
 
@@ -129,7 +129,7 @@ These solve different problems and are commonly combined, not competing choices:
 
 ### What MCP Is
 
-**MCP** is an open protocol (introduced by Anthropic, late 2024) that standardizes how LLM applications connect to external tools and data. Think of it as **USB-C for AI**: instead of every app writing custom glue code for every API, the API is wrapped once in an **MCP server**, and any **MCP client** (Claude Code, Claude Desktop, a Python script, PydanticAI) can plug in and use it.
+**MCP** is an open protocol (introduced by Anthropic, late 2024) that standardizes how LLM applications connect to external tools and data. Think of it as **USB-C for AI**: instead of every app writing custom glue code for every API, the API is wrapped once in an **MCP server**, and any **MCP client** (Claude Code, Claude Desktop, a Python script or any code connecting with server) can plug in and use it. I was confused about Claude Code, Claude Desktop etc. being the MCP client. What's the benefit of it? The benefit of using Claude Code as MCP client for your MCP server, you can test your server by configuring it in Claude Code. This way you don't need to write a test client.
 
 The architecture is client–server:
 

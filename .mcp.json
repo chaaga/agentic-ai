@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "rfp_knowledge_base": {
+      "type": "http",
+      "url": "http://localhost:8052/mcp"
+    },
+    "weather": {
+      "type": "http",
+      "url": "http://localhost:8051/mcp"
+    }
+  }
+}
