@@ -73,28 +73,33 @@ Prompt caching (a.k.a. context caching) lets a provider reuse the model's intern
 
 ### What RAG Is
 
-RAG grounds an LLM's answer in your own documents instead of relying on what the model memorized during training. Pipeline: **embed → vector search → (rerank) → generate**.
+An LLM only "knows" what was in its training data, which is frozen at training time and doesn't include your private documents. RAG works around this without retraining: at query time, it searches your own documents for the most relevant passages and inserts them into the prompt as context, so the LLM answers based on that text instead of (or in addition to) what it memorized. Pipeline: **embed → vector search → (rerank) → generate**.
+For example, the model can still answer "what is 2 + 2" from its training data, but for "What were our company's Q3 sales figures?" it needs extra context.
 
 ```
-query ──► embed ──► vector DB (top-k by similarity) ──► [rerank] ──► LLM (context + query) ──► answer
+query ──► embed ──► vector DB (top-k by similarity) ──► [rerank] ──► LLM (context + encoded query) ──► answer
 ```
 
 The retrieval side ("R") finds relevant text; the generation side ("G") asks the LLM to answer using only that text. Implemented end-to-end in `rfp-assistant-excel/`.
 
-### Two-Stage Retrieval: Bi-encoder + Cross-encoder
+**Retrieval**
+When a user asks a question (e.g., "What were our company's Q3 sales figures?"), there are multiple ways to retrieve relevant information. This repo retrieves from an embedded vector database, built from the knowledge base at startup using the `multi-qa-mpnet-base-dot-v1` model and ChromaDB.
 
-| | Bi-encoder (retrieve) | Cross-encoder (rerank) |
-|---|---|---|
-| How it scores | Encodes query and document **separately**, compares vectors | Encodes query + document **together**, one forward pass |
-| Speed | Fast — documents pre-embedded at ingest time | Slow — must run per query/candidate pair |
-| Scale | Thousands of documents | Only the top-k candidates from stage 1 |
-| Quality | Mediocre on subtle wording differences | Much higher — model sees both texts at once |
+To find a match, the user's question must be embedded with the *same* model used to build the index — otherwise the vectors aren't comparable. You won't see an explicit call to do this: ChromaDB's `collection.query` method embeds the query for you internally before comparing it to the stored vectors.
 
-Stage 1 (bi-encoder + vector DB) provides **recall**: cheaply narrow thousands of documents to a handful of candidates. Stage 2 (cross-encoder) provides **precision**: re-score just those candidates accurately. Used together because the cross-encoder alone is too slow to run against a whole knowledge base.
+This step (**Stage 1 — vector search**) retrieves the top-k matches and hands them to the reranker (**Stage 2 — cross-encoder**) to re-score.
 
-### Confidence Gating
+Stage 1 provides **recall**: cheaply narrow thousands of documents down to a handful of candidates. Stage 2 provides **precision**: re-score just those candidates accurately. The two are used together because the cross-encoder alone is too slow to run against a whole knowledge base. The output of Stage 2 is what gets passed to the model as context.
 
-Don't always force-feed the LLM a context. Score the top reranked candidate(s) and only pass them as context if they clear a threshold; otherwise tell the user no good match was found rather than generating from a weak match. The threshold lives on the reranker's score scale (raw logits vs 0–1 sigmoid), so it must be re-tuned whenever the reranker model changes.
+**Augmentation**
+Adding the retrieved content from retrieval stage to user prompt is augmentation.  
+
+**Generation**
+The LLM receives a giant prompt that basically says: "Based on these specific documents, answer the user's question." The model reads the context using its attention layers and generates an answer grounded in that text — though, as noted below, "grounded" isn't the same as "guaranteed correct."
+
+### Score Thresholding / Gating (what to pass to model)
+
+Don't always force-feed the LLM a context. Score the top reranked candidate(s) and only pass them as context if they clear a threshold; otherwise tell the user no good match was found rather than generating from a weak match. The reranker outputs a relevance score for each candidate — sometimes a raw logit (any real number, e.g. -5 to +5), sometimes normalized to 0–1 via sigmoid. Either way, the threshold lives on that scale, so it must be re-tuned whenever the reranker model changes.
 
 ### Challenges with RAG
 
@@ -105,7 +110,7 @@ Don't always force-feed the LLM a context. Score the top reranked candidate(s) a
 - **No multi-step reasoning** — classic RAG is single-shot retrieve-then-generate; it can't decide "look up X, then based on that look up Y."
 - **"Answer only from context" is an instruction, not a guarantee** — the LLM can still drift or hallucinate.
 
-### RAG vs MCP — When to Use Which
+### RAG vs MCP vs Tools — When to Use Which
 
 These solve different problems and are commonly combined, not competing choices:
 

@@ -1,61 +1,39 @@
 # ============================================================
-# RAG (Retrieval Augmented Generation) - Tech Talk Demo
-# Shows: Embeddings → Vector Search → Reranking → LLM Response
+# RAG (Retrieval Augmented Generation) - Hybrid Variant
+# Same retrieve -> rerank pipeline as rag_with_rerank.py, but
+# the generation step falls back to the model's own knowledge
+# when no confident match is found, instead of refusing.
 # ============================================================
 """
-HOW THIS SCRIPT GETS TO THE BEST RESPONSE
+HOW THIS DIFFERS FROM rag_with_rerank.py
 -----------------------------------------
-Two-stage retrieval, then grounded generation:
+rag_with_rerank.py treats "answer ONLY from context" as a hard rule:
+if nothing clears CONFIDENCE_THRESHOLD, it refuses to answer at all.
+That's the right call for a strict, fully-grounded RFP assistant, but
+it also means a question like "What is 2+2?" gets refused, since it
+has no match in the knowledge base.
 
-1. RETRIEVE (fast, approximate). The embedding model is a "bi-encoder":
-   it encodes the query and each document SEPARATELY into vectors, and
-   ChromaDB returns the top-k closest by vector distance. Because every
-   document was embedded ahead of time at ingest, this scales to
-   thousands of documents - but the query and document never look at
-   each other directly, so subtle matches get mediocre scores.
+This variant uses a single flexible prompt instead:
 
-2. RERANK (slow, accurate). The cross-encoder reads query + candidate
-   TOGETHER in a single pass, so it can weigh exact word interactions
-   between the two texts. Far more accurate, but it must run the full
-   model once per pair - too slow for the whole knowledge base, cheap
-   for 5 candidates. Stage 1 provides recall, stage 2 provides
-   precision; the best match is whichever candidate scores highest.
+    "Answer using the provided context if it's relevant. If no
+    context is provided, or it doesn't address the question,
+    answer from your own knowledge."
 
-3. CONFIDENCE GATE. Only candidates scoring above CONFIDENCE_THRESHOLD
-   are kept (at most MAX_CONTEXTS of them), so the amount of context
-   adapts to how many good matches exist. If none qualify, we say so
-   instead of generating an answer from a bad match. The threshold
-   lives on the reranker's score scale, so it must be re-tuned
-   whenever the reranker model changes (raw logits vs 0-1 sigmoid).
-
-4. GENERATE. The LLM is told to answer ONLY from the retrieved answer.
-   The model supplies fluency; the knowledge base supplies the facts.
+CONFIDENCE GATE (unchanged in spirit):
+- score >= CONFIDENCE_THRESHOLD -> pass the matched answer(s) as context
+- score <  CONFIDENCE_THRESHOLD -> pass empty context, let the model
+  answer from its own training knowledge
 
 KNOWN LIMITATIONS
 -----------------
-- Reranking scores the query against the stored QUESTION only, so a
-  match can be missed when the wording differs (e.g. "single sign on"
-  vs "SSO") even though the stored answer text would have matched.
-- The confidence threshold is hand-picked, not calibrated against any
-  labeled data, and silently breaks when the reranker model changes.
-- Each Excel row is indexed whole - no chunking, so very long answers
-  dilute their embedding.
-- "Answer ONLY from the context" is an instruction, not a guarantee;
-  the LLM can still drift or hallucinate.
-- No conversation memory: every question is answered in isolation.
-
-ENHANCEMENT IDEAS
------------------
-- Rerank against question + answer text, not just the question.
-- Decompose compound questions into sub-questions, retrieve for each
-  sub-question separately, and merge the contexts (agentic RAG).
-- Hybrid search: combine vector similarity with keyword search (BM25),
-  which handles exact terms, IDs, and abbreviations better.
-- Rewrite/expand the query before retrieval (e.g. expand abbreviations).
-- Build a small golden set of question -> expected-match pairs and
-  measure retrieval hit rate, so changes can be evaluated objectively.
-- Calibrate the confidence threshold from those measurements.
-- Add a metadata column (category) and filter the search by it.
+- This collapses the "no match" case into "ask the model anyway",
+  so an in-domain question with no good match (e.g. "do you support
+  SSO?" worded in a way that misses the index) gets a confident-sounding
+  but ungrounded answer instead of "no good match found". For an RFP
+  assistant where every answer must be traceable to a source document,
+  rag_with_rerank.py's stricter behavior is usually the safer default.
+- Same retrieval limitations as rag_with_rerank.py (question-only
+  reranking, no chunking, hand-picked threshold).
 """
 
 import pandas as pd
@@ -76,15 +54,11 @@ CONFIDENCE_THRESHOLD = 0.15
 MAX_CONTEXTS = 3
 
 # ---- STEP 1: EMBEDDING MODEL --------------------------------
-# Converts text into vectors (lists of numbers)
-# Similar meaning = similar vectors = close in vector space
 emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
     model_name="multi-qa-mpnet-base-dot-v1"
 )
 
 # ---- STEP 2: VECTOR DATABASE --------------------------------
-# Stores text + their vector representations on disk
-# Enables fast similarity search across thousands of documents
 client = chromadb.PersistentClient(path="./chroma_db")
 collection = client.get_or_create_collection(
     name="rag_demo",
@@ -92,20 +66,16 @@ collection = client.get_or_create_collection(
 )
 
 # ---- STEP 3: INGEST KNOWLEDGE BASE --------------------------
-# This is the "R" in RAG — building the retrieval index
 def ingest(file_path: str):
     print("\nIngesting knowledge base...")
     df = pd.read_excel(file_path)
     questions = df["Question"].astype(str).tolist()
     answers = df["Answer"].astype(str).tolist()
 
-    # Clear old data
     existing_ids = collection.get()["ids"]
     if existing_ids:
         collection.delete(ids=existing_ids)
 
-    # Index question + answer together
-    # This helps match questions phrased differently
     collection.add(
         documents=[f"{q}\n{a}" for q, a in zip(questions, answers)],
         metadatas=[{"question": q, "answer": a} for q, a in zip(questions, answers)],
@@ -115,12 +85,10 @@ def ingest(file_path: str):
 
 
 # ---- STEP 4: RETRIEVE ---------------------------------------
-# Find the most similar documents to the query
 def retrieve(query: str, top_k: int = 5) -> list:
     print(f"Retrieving top {top_k} matches for:\n   '{query}'\n")
     results = collection.query(query_texts=[query], n_results=top_k)
 
-    # Each candidate is a dict with "question" and "answer" keys
     candidates = results["metadatas"][0]
     for candidate, distance in zip(candidates, results["distances"][0]):
         print(f"   [{distance:.4f}] {candidate['question'][:70]}")
@@ -128,9 +96,6 @@ def retrieve(query: str, top_k: int = 5) -> list:
 
 
 # ---- STEP 5: RERANK -----------------------------------------
-# Cross-encoder reads BOTH texts together for better matching
-# Much more accurate than embeddings but slower — so we use it
-# only on the small set of candidates retrieved above
 reranker = CrossEncoder("BAAI/bge-reranker-base")
 
 def rerank(query: str, candidates: list) -> list:
@@ -141,7 +106,6 @@ def rerank(query: str, candidates: list) -> list:
     for candidate, score in zip(candidates, scores):
         print(f"   [{score:6.2f}] {candidate['question'][:70]}")
 
-    # Pair each candidate with its score, best first
     ranked = [(float(score), candidate) for score, candidate in zip(scores, candidates)]
     ranked.sort(key=lambda pair: pair[0], reverse=True)
     print(f"\nPrinting {len(candidates)} candidates after sorting...")
@@ -152,18 +116,23 @@ def rerank(query: str, candidates: list) -> list:
 
 
 # ---- STEP 6: GENERATE ---------------------------------------
-# The "G" in RAG — LLM uses the retrieved answer as context
-# Running 100% locally via Ollama — no data leaves your machine
+# Hybrid prompt: use the context if it's there and relevant,
+# otherwise fall back to the model's own knowledge.
 def generate(query: str, context: str) -> str:
     print("\nGenerating response with Ollama (llama3.1:8b)...")
     response = ollama.chat(
         model="llama3.1:8b",
         messages=[
-            {"role": "system", "content": "Answer the question using ONLY the provided context."},
+            {
+                "role": "system",
+                "content": (
+                    "Answer the question using the provided context if it's "
+                    "relevant. If no context is provided, or it doesn't "
+                    "address the question, answer from your own knowledge."
+                ),
+            },
             {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}\n\nAnswer:"},
         ],
-        # 2048 was enough for one answer; with up to MAX_CONTEXTS answers
-        # in the prompt, a larger window avoids silent truncation
         options={"temperature": 0.0, "num_ctx": 8192},
     )
     return response["message"]["content"].strip()
@@ -183,14 +152,15 @@ def rag_pipeline(query: str):
     good = good[:MAX_CONTEXTS]
 
     if not good:
-        print("\nNo confident match found — consider reviewing the knowledge base.")
+        print("\nNo confident match found — answering from the model's own knowledge.")
+        context = ""
     else:
         print(f"\nUsing {len(good)} match(es) as context (best score: {good[0][0]:.2f})")
         context = "\n\n---\n\n".join(c["answer"] for score, c in good)
         print(f"\nContext sent to the model:\n{context}\n")
-        answer = generate(query, context)
-        print(f"\nFinal Answer:\n{answer}")
 
+    answer = generate(query, context)
+    print(f"\nFinal Answer:\n{answer}")
     print("=" * 60)
 
 
